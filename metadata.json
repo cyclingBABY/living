@@ -1,0 +1,6 @@
+{
+  "name": "Living",
+  "description": "Premium full-stack rental property application for tenants, landlords, and administrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
