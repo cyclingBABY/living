@@ -24,13 +24,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.gestures.detectDragGestures
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.ui.platform.LocalConfiguration
 import com.example.data.model.Application
 import com.example.data.model.Message
 import com.example.data.model.Payment
 import com.example.data.model.Property
+import com.example.data.model.User
 import com.example.ui.theme.LivingOrangeSecondary
 import com.example.ui.theme.LivingTealPrimary
 import com.example.ui.theme.LivingTealLight
@@ -63,24 +69,92 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
     var activeTenantTab by remember { mutableStateOf("HOME") } // HOME, SEARCH, SAVE, APPS, NOTIFY, MESSAGES, PROFILE
     var activeLandlordTab by remember { mutableStateOf("DASHBOARD") } // DASHBOARD, ADD, APPLICANTS, MESSAGES, PROFILE, PROMOTE
     var activeAdminTab by remember { mutableStateOf("DASHBOARD") } // DASHBOARD, USERS, PAYMENTS
+    var adminDashboardViewOverride by remember { mutableStateOf<String?>(null) }
+    var showGoogleChooser by remember { mutableStateOf(false) }
+    var isCockpitCollapsed by remember { mutableStateOf(false) }
+    var cockpitOffset by remember { mutableStateOf(Offset.Zero) }
 
     val session by viewModel.currentUser.collectAsState()
+    val renderRole = if (session?.role == "ADMIN") adminDashboardViewOverride ?: "ADMIN" else session?.role
 
     var activePropertyIdDetails by remember { mutableStateOf<Int?>(null) }
     var activeChatPartnerId by remember { mutableStateOf<Int?>(null) }
 
-    // Handle initial splash screen countdown
+    // Handle initial splash screen countdown with automatic session restoration
     LaunchedEffect(Unit) {
         delay(2600)
-        appStage = "ONBOARDING"
+        viewModel.tryPersistentLogin(
+            onSuccess = {
+                appStage = "MAIN"
+            },
+            onFailure = {
+                appStage = "ONBOARDING"
+            }
+        )
     }
+
+    val configuration = LocalConfiguration.current
+    val isWideScreen = configuration.screenWidthDp >= 600
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        topBar = {
+            val impersonatorAdminUser by viewModel.impersonatorAdminUser.collectAsState()
+            if (impersonatorAdminUser != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    ),
+                    shape = RoundedCornerShape(0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AdminPanelSettings,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Masquerade Mode: Active Session as ${session?.name} (${session?.role})",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Button(
+                            onClick = { viewModel.stopImpersonating() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("Exit Masquerade", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        },
         bottomBar = {
-            if (appStage == "MAIN" && session != null) {
+            if (appStage == "MAIN" && session != null && session!!.hasActiveAccess() && !isWideScreen) {
                 // Role-based bottom navigation
-                when (session?.role) {
+                when (renderRole) {
                     "TENANT" -> {
                         NavigationBar(
                             containerColor = MaterialTheme.colorScheme.surface,
@@ -181,12 +255,133 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
             }
         }
     ) { innerPadding ->
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (appStage) {
+            if (appStage == "MAIN" && session != null && session!!.hasActiveAccess() && isWideScreen) {
+                NavigationRail(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = LivingTealPrimary,
+                    header = {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 16.dp)
+                        ) {
+                            AppLogoCanvas(animationTrigger = true, modifier = Modifier.size(56.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Living",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = LivingTealPrimary,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxHeight(),
+                    windowInsets = WindowInsets.systemBars
+                ) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    when (renderRole) {
+                        "TENANT" -> {
+                            NavigationRailItem(
+                                selected = activeTenantTab == "HOME",
+                                onClick = { activeTenantTab = "HOME"; activePropertyIdDetails = null },
+                                icon = { Icon(imageVector = Icons.Default.Explore, contentDescription = "Home") },
+                                label = { Text("Explore", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeTenantTab == "SEARCH",
+                                onClick = { activeTenantTab = "SEARCH" },
+                                icon = { Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = "AI Match") },
+                                label = { Text("AI Match", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeTenantTab == "SAVE",
+                                onClick = { activeTenantTab = "SAVE" },
+                                icon = { Icon(imageVector = Icons.Default.Favorite, contentDescription = "Favorites") },
+                                label = { Text("Favorites", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeTenantTab == "APPS",
+                                onClick = { activeTenantTab = "APPS" },
+                                icon = { Icon(imageVector = Icons.Default.Description, contentDescription = "Applications") },
+                                label = { Text("My Space", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeTenantTab == "INBOX",
+                                onClick = { activeTenantTab = "INBOX" },
+                                icon = { Icon(imageVector = Icons.Default.ChatBubble, contentDescription = "Inbox") },
+                                label = { Text("Inbox", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                        }
+                        "LANDLORD" -> {
+                            NavigationRailItem(
+                                selected = activeLandlordTab == "DASHBOARD",
+                                onClick = { activeLandlordTab = "DASHBOARD"; activePropertyIdDetails = null },
+                                icon = { Icon(imageVector = Icons.Default.Dashboard, contentDescription = "Dashboard") },
+                                label = { Text("Overview", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeLandlordTab == "INBOX",
+                                onClick = { activeLandlordTab = "INBOX" },
+                                icon = { Icon(imageVector = Icons.Default.ChatBubble, contentDescription = "Inbox") },
+                                label = { Text("Inbox", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeLandlordTab == "PROMOTE",
+                                onClick = { activeLandlordTab = "PROMOTE" },
+                                icon = { Icon(imageVector = Icons.Default.Stars, contentDescription = "Promote") },
+                                label = { Text("Advers", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeLandlordTab == "PROFILE",
+                                onClick = { activeLandlordTab = "PROFILE" },
+                                icon = { Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Profile") },
+                                label = { Text("Profile", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                        }
+                        "ADMIN" -> {
+                            NavigationRailItem(
+                                selected = activeAdminTab == "DASHBOARD",
+                                onClick = { activeAdminTab = "DASHBOARD" },
+                                icon = { Icon(imageVector = Icons.Default.AdminPanelSettings, contentDescription = "Panel") },
+                                label = { Text("Board", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeAdminTab == "SUPPORT",
+                                onClick = { activeAdminTab = "SUPPORT" },
+                                icon = { Icon(imageVector = Icons.Default.SupportAgent, contentDescription = "Support") },
+                                label = { Text("Concierge", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            NavigationRailItem(
+                                selected = activeAdminTab == "USERS",
+                                onClick = { activeAdminTab = "USERS" },
+                                icon = { Icon(imageVector = Icons.Default.SupervisorAccount, contentDescription = "Users") },
+                                label = { Text("Users", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+            ) {
+                when (appStage) {
                 // ==========================================
                 // SPLASH STAGE
                 // ==========================================
@@ -224,13 +419,34 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                 // ==========================================
                 "ONBOARDING" -> {
                     val currentSlide = onboardingSlides[onboardingIndex]
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
+                        Column(
+                            modifier = if (isWideScreen) {
+                                Modifier
+                                    .widthIn(max = 520.dp)
+                                    .fillMaxWidth()
+                                    .padding(24.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .padding(32.dp)
+                            } else {
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp)
+                            },
+                            verticalArrangement = Arrangement.SpaceBetween,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
@@ -316,20 +532,43 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                             }
                         }
                     }
+                    }
                 }
 
                 // ==========================================
                 // LOGIN SCREEN STAGE
                 // ==========================================
                 "LOGIN" -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
+                        Column(
+                            modifier = if (isWideScreen) {
+                                Modifier
+                                    .widthIn(max = 520.dp)
+                                    .fillMaxWidth()
+                                    .padding(24.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .padding(32.dp)
+                                    .verticalScroll(rememberScrollState())
+                            } else {
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp)
+                                    .verticalScroll(rememberScrollState())
+                            },
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                         Spacer(modifier = Modifier.height(24.dp))
                         AppLogoCanvas(animationTrigger = true)
 
@@ -394,6 +633,49 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                             Text("Confirm Sign In", fontWeight = FontWeight.Bold)
                         }
 
+                        Text(
+                            text = "— OR —",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray.copy(alpha = 0.8f),
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        // Google Sign In button
+                        OutlinedButton(
+                            onClick = { showGoogleChooser = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("google_login_btn"),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.DarkGray
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Canvas(modifier = Modifier.size(18.dp)) {
+                                    val w = size.width
+                                    drawArc(color = Color(0xFFEA4335), startAngle = 180f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFFFBBC05), startAngle = 90f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFF34A853), startAngle = 0f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFF4285F4), startAngle = 270f, sweepAngle = 90f, useCenter = true)
+                                    drawCircle(color = Color.White, radius = w * 0.35f)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF202124),
+                                    fontSize = 15.sp
+                                )
+                            }
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -434,20 +716,43 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                             }
                         }
                     }
+                    }
                 }
 
                 // ==========================================
                 // REGISTER SCREEN STAGE
                 // ==========================================
                 "REGISTER" -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
+                        Column(
+                            modifier = if (isWideScreen) {
+                                Modifier
+                                    .widthIn(max = 520.dp)
+                                    .fillMaxWidth()
+                                    .padding(24.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(24.dp)
+                                    )
+                                    .padding(32.dp)
+                                    .verticalScroll(rememberScrollState())
+                            } else {
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(24.dp)
+                                    .verticalScroll(rememberScrollState())
+                            },
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                         Text(
                             text = "Create Living Account",
                             style = MaterialTheme.typography.titleLarge,
@@ -535,9 +840,53 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                             Text("Complete Registration", fontWeight = FontWeight.Bold)
                         }
 
+                        Text(
+                            text = "— OR —",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray.copy(alpha = 0.8f),
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        // Google Sign In button for Register Stage
+                        OutlinedButton(
+                            onClick = { showGoogleChooser = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("google_register_btn"),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color.White,
+                                contentColor = Color.DarkGray
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Canvas(modifier = Modifier.size(18.dp)) {
+                                    val w = size.width
+                                    drawArc(color = Color(0xFFEA4335), startAngle = 180f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFFFBBC05), startAngle = 90f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFF34A853), startAngle = 0f, sweepAngle = 90f, useCenter = true)
+                                    drawArc(color = Color(0xFF4285F4), startAngle = 270f, sweepAngle = 90f, useCenter = true)
+                                    drawCircle(color = Color.White, radius = w * 0.35f)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Continue with Google",
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF202124),
+                                    fontSize = 15.sp
+                                )
+                            }
+                        }
+
                         TextButton(onClick = { appStage = "LOGIN" }) {
                             Text("Back to Sign In", color = LivingTealPrimary)
                         }
+                    }
                     }
                 }
 
@@ -546,9 +895,25 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                 // ==========================================
                 "MAIN" -> {
                     if (session != null) {
-
-                    // Dynamic Sub-screens wrapper based on role
-                    when (session?.role) {
+                        if (!session!!.hasActiveAccess()) {
+                            SubscriptionBarrierView(
+                                user = session!!,
+                                viewModel = viewModel,
+                                onSignOut = { appStage = "LOGIN" }
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .widthIn(max = 1200.dp)
+                                        .fillMaxWidth()
+                                ) {
+                                    // Dynamic Sub-screens wrapper based on role
+                                    when (renderRole) {
                         "TENANT" -> {
                             if (activePropertyIdDetails != null) {
                                 PropertyDetailsAndApplicationView(
@@ -667,15 +1032,331 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                                     PersonalAIConsultantCenter(viewModel = viewModel, onNavigateDetails = {})
                                 }
                                 "USERS" -> {
-                                    UserProfileSettingsView(viewModel = viewModel, onLogout = { appStage = "LOGIN" })
+                                    AdminUsersManagementView(viewModel = viewModel, onLogout = { appStage = "LOGIN" })
                                 }
                             }
                         }
                     }
+                    }
+
+                    if (session?.role == "ADMIN") {
+                        val alignment = if (isWideScreen) Alignment.BottomEnd else Alignment.BottomCenter
+                        val bottomPadding = if (isWideScreen) 24.dp else 85.dp
+                        val endPadding = if (isWideScreen) 32.dp else 0.dp
+
+                        Box(
+                            modifier = Modifier
+                                .align(alignment)
+                                .windowInsetsPadding(WindowInsets.navigationBars)
+                                .padding(bottom = bottomPadding, end = endPadding)
+                                .offset { IntOffset(cockpitOffset.x.roundToInt(), cockpitOffset.y.roundToInt()) }
+                                .testTag("admin_floating_cockpit")
+                        ) {
+                            if (isCockpitCollapsed) {
+                                // Sleek space-saving circular bubble, fully draggable & click-re-expandable
+                                Card(
+                                    shape = CircleShape,
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = LivingTealPrimary,
+                                        contentColor = Color.White
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .pointerInput(Unit) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                cockpitOffset = Offset(
+                                                    cockpitOffset.x + dragAmount.x,
+                                                    cockpitOffset.y + dragAmount.y
+                                                )
+                                            }
+                                        }
+                                        .clickable { isCockpitCollapsed = false }
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AdminPanelSettings,
+                                            contentDescription = "Expand Admin Cockpit",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                        // A tiny white ring indicator to hint interactivity
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .align(Alignment.TopEnd)
+                                                .padding(top = 4.dp, end = 4.dp)
+                                                .background(Color.White, CircleShape)
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Upgraded toolbar with explicit Drag Handle to move, dashboard tabs, and minimize control
+                                Card(
+                                    shape = RoundedCornerShape(32.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                                        contentColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp),
+                                    modifier = Modifier
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = LivingTealPrimary.copy(alpha = 0.45f),
+                                            shape = RoundedCornerShape(32.dp)
+                                        )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Sleek Drag Handle on Left to reposition the toolbar smoothly
+                                        Icon(
+                                            imageVector = Icons.Default.DragHandle,
+                                            contentDescription = "Drag to reposition",
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                            modifier = Modifier
+                                                .padding(start = 6.dp)
+                                                .size(22.dp)
+                                                .pointerInput(Unit) {
+                                                    detectDragGestures { change, dragAmount ->
+                                                        change.consume()
+                                                        cockpitOffset = Offset(
+                                                            cockpitOffset.x + dragAmount.x,
+                                                            cockpitOffset.y + dragAmount.y
+                                                        )
+                                                    }
+                                                }
+                                        )
+
+                                        // Admin Tab Selector
+                                        val isAdminSel = adminDashboardViewOverride == null
+                                        FilledIconButton(
+                                            onClick = {
+                                                adminDashboardViewOverride = null
+                                                activePropertyIdDetails = null
+                                                activeChatPartnerId = null
+                                            },
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = if (isAdminSel) LivingTealPrimary else Color.Transparent,
+                                                contentColor = if (isAdminSel) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                            ),
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AdminPanelSettings,
+                                                contentDescription = "Admin Cockpit",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+
+                                        // Tenant Tab Selector
+                                        val isTenantSel = adminDashboardViewOverride == "TENANT"
+                                        FilledIconButton(
+                                            onClick = {
+                                                adminDashboardViewOverride = "TENANT"
+                                                activePropertyIdDetails = null
+                                                activeChatPartnerId = null
+                                            },
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = if (isTenantSel) LivingTealPrimary else Color.Transparent,
+                                                contentColor = if (isTenantSel) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                            ),
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Explore,
+                                                contentDescription = "Tenant Environment",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+
+                                        // Landlord Tab Selector
+                                        val isLandlordSel = adminDashboardViewOverride == "LANDLORD"
+                                        FilledIconButton(
+                                            onClick = {
+                                                adminDashboardViewOverride = "LANDLORD"
+                                                activePropertyIdDetails = null
+                                                activeChatPartnerId = null
+                                            },
+                                            colors = IconButtonDefaults.filledIconButtonColors(
+                                                containerColor = if (isLandlordSel) LivingTealPrimary else Color.Transparent,
+                                                contentColor = if (isLandlordSel) Color.White else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                                            ),
+                                            modifier = Modifier.size(44.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.HomeWork,
+                                                contentDescription = "Landlord Environment",
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(2.dp))
+
+                                        // Minimize button to toggle back to compact state
+                                        IconButton(
+                                            onClick = { isCockpitCollapsed = true },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Collapse Cockpit",
+                                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    }
+                    }
                 }
                 }
             }
+            }
         }
+    }
+
+    if (showGoogleChooser) {
+        AlertDialog(
+            onDismissRequest = { showGoogleChooser = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            modifier = Modifier
+                .padding(20.dp)
+                .widthIn(max = 440.dp)
+                .clip(RoundedCornerShape(28.dp)),
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showGoogleChooser = false }) {
+                    Text("Cancel", color = Color.Gray, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            title = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Canvas(modifier = Modifier.size(24.dp)) {
+                            val w = size.width
+                            drawArc(color = Color(0xFFEA4335), startAngle = 180f, sweepAngle = 90f, useCenter = true)
+                            drawArc(color = Color(0xFFFBBC05), startAngle = 90f, sweepAngle = 90f, useCenter = true)
+                            drawArc(color = Color(0xFF34A853), startAngle = 0f, sweepAngle = 90f, useCenter = true)
+                            drawArc(color = Color(0xFF4285F4), startAngle = 270f, sweepAngle = 90f, useCenter = true)
+                            drawCircle(color = Color.White, radius = w * 0.35f)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Google",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF202124)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Sign in to Living",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF202124)
+                    )
+                    Text(
+                        text = "Choose an account to continue securely",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val googleAccounts = listOf(
+                        Triple("stuartdonsms@gmail.com", "Stuart Don (Admin)", "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&q=80"),
+                        Triple("leila.nassali@gmail.com", "Leila Nassali (Tenant)", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"),
+                        Triple("mukasa.lands@gmail.com", "Mukasa Properties (Landlord)", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&q=80")
+                    )
+
+                    googleAccounts.forEach { (gEmail, gName, gAvatar) ->
+                        Card(
+                            onClick = {
+                                showGoogleChooser = false
+                                viewModel.loginWithGoogle(gEmail, gName) {
+                                    appStage = "MAIN"
+                                }
+                            },
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F3F4)),
+                            border = BorderStroke(1.dp, Color.LightGray.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("google_account_${gEmail.split("@")[0]}")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                AsyncImage(
+                                    model = gAvatar,
+                                    contentDescription = gName,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = gName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF202124)
+                                    )
+                                    Text(
+                                        text = gEmail,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = Color.Gray,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            showGoogleChooser = false
+                            viewModel.loginWithGoogle("stuartdonsms@gmail.com", "Stuart Don (Admin)") {
+                                appStage = "MAIN"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.3f))
+                    ) {
+                        Text("Use another account", color = Color.DarkGray, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -693,9 +1374,12 @@ fun MessengerChatRoomOverlay(
 
     var textInput by remember { mutableStateOf("") }
 
-    // Synchronize chat loading
-    LaunchedEffect(partnerId) {
+    // Synchronize chat loading with safe lifecycle cleanup
+    DisposableEffect(partnerId) {
         viewModel.activeChatPartnerId.value = partnerId
+        onDispose {
+            viewModel.activeChatPartnerId.value = null
+        }
     }
 
     Column(
@@ -1287,53 +1971,546 @@ fun UserProfileSettingsView(
     onLogout: () -> Unit
 ) {
     val session by viewModel.currentUser.collectAsState()
+    val isRatingHidden by viewModel.isRatingHidden.collectAsState()
+    val isDmsDisabled by viewModel.isDmsDisabled.collectAsState()
+    val isPhoneHidden by viewModel.isPhoneHidden.collectAsState()
+    val isLocationEnabled by viewModel.isLocationEnabled.collectAsState()
+
+    var isEditMode by remember { mutableStateOf(false) }
+    var editedName by remember { mutableStateOf("") }
+    var editedPhone by remember { mutableStateOf("") }
+    var editedCompanyName by remember { mutableStateOf("") }
+    var editedAvatarUrl by remember { mutableStateOf("") }
+
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showSubscriptionDialog by remember { mutableStateOf(false) }
+
+    val avatarPresets = listOf(
+        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80" to "Modern Pink",
+        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80" to "Classic Professional",
+        "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80" to "Minimal Soft",
+        "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&q=80" to "Warm Artsy",
+        "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&q=80" to "Vintage Dark"
+    )
+
+    LaunchedEffect(isEditMode) {
+        if (isEditMode) {
+            editedName = session?.name ?: ""
+            editedPhone = session?.phone ?: ""
+            editedCompanyName = session?.companyName ?: ""
+            editedAvatarUrl = session?.avatarUrl ?: ""
+        }
+    }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = {
+                Text(
+                    text = "Delete Account Permanently?",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you absolutely sure value you want to close your 'Living' account? All your registered digital catalogs, applications, and messaging trails will be deleted permanently. This is irreversible.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        viewModel.deleteUserAccount {
+                            onLogout()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Permanently Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text("Keep Account")
+                }
+            }
+        )
+    }
+
+    if (showSubscriptionDialog) {
+        AlertDialog(
+            onDismissRequest = { showSubscriptionDialog = false },
+            title = {
+                Text(
+                    text = "Extend Living Access Package",
+                    fontWeight = FontWeight.Bold,
+                    color = LivingTealPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Choose your desired premium membership duration. Payments will be simulated using Uganda MTNs/Airtel secured API checkout gateway.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    
+                    Button(
+                        onClick = {
+                            viewModel.purchaseSubscription(1) {
+                                showSubscriptionDialog = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LivingTealPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("1 Month Renewal (3,000 UGX)")
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.purchaseSubscription(6) {
+                                showSubscriptionDialog = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LivingTealPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("6 Months Package (15,000 UGX - Save 3K)")
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.purchaseSubscription(12) {
+                                showSubscriptionDialog = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = LivingOrangeSecondary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("12 Months Super-saver (28,000 UGX)")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSubscriptionDialog = false }) {
+                    Text("Dismiss Gateway")
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text(text = "Vetted Profile Parameters", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text(
+            text = "My Profile & App Settings",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
 
+        // 1. Profile Core Details Card
         GlassCard(tonalElevation = 6.dp) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(20.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Box(modifier = Modifier.size(64.dp).clip(CircleShape)) {
-                    AsyncImage(model = session?.avatarUrl ?: "https://unsplash.com", contentDescription = "Avatar")
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(text = session?.name ?: "Stuart Don", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(text = session?.email ?: "tenant@living.com", style = MaterialTheme.typography.bodyMedium)
+                if (isEditMode) {
+                    Text(
+                        text = "Edit Vetted Parameters",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = LivingTealPrimary
+                    )
+
+                    // Avatar Preview with edit helper
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = Modifier.size(6.dp).background(LivingTealPrimary, CircleShape))
-                        Text(text = "Vouched member: ${session?.role ?: "TENANT"}", style = MaterialTheme.typography.labelSmall)
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, LivingTealPrimary, CircleShape)
+                        ) {
+                            AsyncImage(
+                                model = editedAvatarUrl.ifEmpty { "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&q=80" },
+                                contentDescription = "Active avatar preview",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(text = "Profile Avatar URL", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            OutlinedTextField(
+                                value = editedAvatarUrl,
+                                onValueChange = { editedAvatarUrl = it },
+                                placeholder = { Text("https://example.com/photo.jpg") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("avatar_url_input")
+                            )
+                        }
+                    }
+
+                    // Preset Avatars Picker
+                    Text(
+                        text = "Or choose from luxury presets:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        avatarPresets.forEach { (url, label) ->
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .border(
+                                        width = if (editedAvatarUrl == url) 2.5.dp else 1.dp,
+                                        color = if (editedAvatarUrl == url) LivingTealPrimary else Color.Gray.copy(alpha = 0.5f),
+                                        shape = CircleShape
+                                    )
+                                    .clickable { editedAvatarUrl = url }
+                            ) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = label,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    // Basic Inputs
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(text = "Full Identity Name", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = editedName,
+                            onValueChange = { editedName = it },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("edit_profile_name")
+                        )
+
+                        Text(text = "Contact Phone Number", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = editedPhone,
+                            onValueChange = { editedPhone = it },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("edit_profile_phone")
+                        )
+
+                        if (session?.role == "LANDLORD" || session?.role == "ADMIN") {
+                            Text(text = "Real Estate / Corporate Company Group Name", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            OutlinedTextField(
+                                value = editedCompanyName,
+                                onValueChange = { editedCompanyName = it },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("edit_profile_company")
+                            )
+                        }
+                    }
+
+                    // Save / Cancel Actions
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { isEditMode = false },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Discard")
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.updateUserProfile(
+                                    name = editedName.trim(),
+                                    phone = editedPhone.trim(),
+                                    companyName = editedCompanyName.trim(),
+                                    avatarUrl = editedAvatarUrl.trim()
+                                ) {
+                                    isEditMode = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LivingTealPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f).testTag("save_profile_details")
+                        ) {
+                            Text("Save Profile", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                } else {
+                    // Standard Profile Read Mode
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(modifier = Modifier.size(72.dp).clip(CircleShape).border(1.5.dp, LivingTealPrimary, CircleShape)) {
+                            AsyncImage(
+                                model = session?.avatarUrl ?: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&q=80",
+                                contentDescription = "User Avatar",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = session?.name ?: "Guest User", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(text = session?.email ?: "guest@living.com", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(modifier = Modifier.size(8.dp).background(LivingTealPrimary, CircleShape))
+                                Text(
+                                    text = "Member Level: ${session?.role ?: "TENANT"}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    if (session?.phone != null && session?.phone != "N/A" && session?.phone!!.isNotEmpty()) {
+                        Text(
+                            text = "Phone Contact: ${session?.phone}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    if (session?.companyName != null && session?.companyName!!.isNotEmpty()) {
+                        Text(
+                            text = "Organization: ${session?.companyName}",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+
+                    // Rating Info
+                    if (!isRatingHidden) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "My Community Rating:",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            RatingStars(rating = session?.rating ?: 5.0f, starSize = 18.dp)
+                        }
+                    }
+
+                    Button(
+                        onClick = { isEditMode = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("edit_profile_trigger")
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit profile", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Edit Profile Parameters", fontSize = 14.sp)
                     }
                 }
             }
         }
 
-        // Ratings feedback if present
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(text = "My Community Rating:")
-            RatingStars(rating = session?.rating ?: 5.0f, starSize = 18.dp)
+        // 2. Access Protection and Subscription status
+        if (session != null && session?.email != "guest@living.com" && session?.id != -1) {
+            val statusColor = if (session!!.hasActiveAccess()) LivingTealPrimary else MaterialTheme.colorScheme.error
+            GlassCard(tonalElevation = 2.dp) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(text = "System Access and Premium Billing", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = "Membership Access:", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = session!!.getSubscriptionStatusText(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = statusColor
+                        )
+                    }
+
+                    Text(
+                        text = "Standard subscription keeps your high-fidelity catalogs live, active, and indexed. Support local operations in Uganda via standard mobile checks.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+
+                    Button(
+                        onClick = { showSubscriptionDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = LivingTealPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("extend_subscription_trigger")
+                    ) {
+                        Icon(imageVector = Icons.Default.Payment, contentDescription = "Extend membership", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Renew / Boost Membership Pack")
+                    }
+                }
+            }
         }
 
-        Divider()
+        // 3. Robust Privacy Settings Controls
+        GlassCard(tonalElevation = 4.dp) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    text = "Aesthetic Privacy Configurations",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
 
-        Spacer(modifier = Modifier.weight(1f))
+                // Hide Rating Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Hide Rating on listings", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Prevent other agents from seeing your rating statistics.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = isRatingHidden,
+                        onCheckedChange = { viewModel.toggleRatingHidden(it) },
+                        modifier = Modifier.testTag("privacy_rating_switch")
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                // Disable MSG Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Restrict Direct Messaging", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Only let active verified tenants/landlords inbox your profile.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = isDmsDisabled,
+                        onCheckedChange = { viewModel.toggleDmsDisabled(it) },
+                        modifier = Modifier.testTag("privacy_dms_switch")
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                // Hide Phone Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Hide Contact Phone Number", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Mask your telephone numbers until you accept visitation request.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = isPhoneHidden,
+                        onCheckedChange = { viewModel.togglePhoneHidden(it) },
+                        modifier = Modifier.testTag("privacy_phone_switch")
+                    )
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                // Geo Location personalized recommendations
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Location Personalization", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Enable smart nearby educational/medical facility highlighting.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                    Switch(
+                        checked = isLocationEnabled,
+                        onCheckedChange = { viewModel.toggleLocationEnabled(it) },
+                        modifier = Modifier.testTag("privacy_location_switch")
+                    )
+                }
+            }
+        }
+
+        // 4. Secure Sign Out & Danger Zone Account Deletion Card
+        GlassCard(
+            tonalElevation = 1.dp,
+            modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "Danger Zone Configurations",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+
+                Text(
+                    text = "Deleting your account is permanent. It clears all security data records, application histories, and communication records instantly. Guest credentials do not require manual deletion.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+
+                if (session?.email != "guest@living.com" && session?.id != -1) {
+                    Button(
+                        onClick = { showDeleteConfirmation = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("delete_account_btn")
+                    ) {
+                        Text("Delete Account Permanently", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
 
         Button(
             onClick = {
@@ -1341,14 +2518,226 @@ fun UserProfileSettingsView(
                     onLogout()
                 }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.outline),
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
                 .testTag("logout_btn_trigger")
         ) {
+            Icon(imageVector = Icons.Default.Logout, contentDescription = "Logout icon", modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             Text("Secure Sign Out", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+// ==========================================
+// 4. UGANDA BIOMETRIC SECURED MOBILE MONEY CHECKOUT GATEWAY SCREEN
+// ==========================================
+@Composable
+fun SubscriptionBarrierView(
+    user: User,
+    viewModel: LivingViewModel,
+    onSignOut: () -> Unit
+) {
+    var phoneNumber by remember { mutableStateOf(user.phone) }
+    var selectedNetwork by remember { mutableStateOf("MTN Mobile Money") }
+    var isLoading by remember { mutableStateOf(false) }
+    var paymentStatusText by remember { mutableStateOf("") }
+    
+    val requiredPrice = if (user.role == "LANDLORD") 35000 else 3000
+    val formattedPrice = "%,d UGX".format(requiredPrice)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 500.dp)
+                .fillMaxWidth()
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(24.dp)
+                )
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // App Logo Icon
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(LivingTealPrimary.copy(alpha = 0.1f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CreditCard,
+                    contentDescription = "Wallet",
+                    tint = LivingTealPrimary,
+                    modifier = Modifier.size(40.dp)
+                )
+            }
+
+            Text(
+                text = "Account Renewal Required",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Text(
+                text = "Your one-week free trial has completed. To keep your ${user.role.lowercase()} account active, clear the monthly system maintenance premium fee specified below.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Subscription Price:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "$formattedPrice / month",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = LivingTealPrimary
+                )
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+            if (!isLoading) {
+                Text(
+                    text = "Select Mobile Money Network:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf("MTN Mobile Money", "Airtel Money").forEach { network ->
+                        val isSelected = selectedNetwork == network
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(
+                                    color = if (isSelected) LivingTealPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    width = if (isSelected) 2.dp else 1.dp,
+                                    color = if (isSelected) LivingTealPrimary else MaterialTheme.colorScheme.outlineVariant,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { selectedNetwork = network }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = network,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) LivingTealPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = { phoneNumber = it },
+                    label = { Text("Mobile Money Phone Number") },
+                    placeholder = { Text("e.g. 0782XXXXXX") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
+                    leadingIcon = {
+                        Icon(imageVector = Icons.Default.PhoneAndroid, contentDescription = null, tint = Color.Gray)
+                    }
+                )
+
+                Button(
+                    onClick = {
+                        if (phoneNumber.isNotEmpty()) {
+                            isLoading = true
+                            paymentStatusText = "Initializing $selectedNetwork secured prompt..."
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = LivingTealPrimary)
+                ) {
+                    Text(text = "Initialize Payment of $formattedPrice", fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(color = LivingTealPrimary, strokeWidth = 3.dp)
+                    Text(
+                        text = paymentStatusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Simulate payment prompt confirmation after brief delays
+                LaunchedEffect(Unit) {
+                    delay(1500)
+                    paymentStatusText = "Secured connection verified. Awaiting PIN authorization on device..."
+                    delay(2500)
+                    paymentStatusText = "Processing receipt validation..."
+                    delay(1000)
+                    viewModel.paySubscription(
+                        paymentMethod = selectedNetwork,
+                        amount = requiredPrice.toDouble(),
+                        phoneNumber = phoneNumber,
+                        onSuccess = {
+                            isLoading = false
+                            paymentStatusText = ""
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            TextButton(
+                onClick = {
+                    viewModel.logout {
+                        onSignOut()
+                    }
+                }
+            ) {
+                Text(text = "Log out or Switch Account", color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 }

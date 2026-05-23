@@ -30,6 +30,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.Paint
+import android.graphics.Rect
 
 // --- Custom Modern Glassmorphic Container ---
 @Composable
@@ -50,15 +56,13 @@ fun GlassCard(
     )
 }
 
+
 // --- Logo Drawing with Canvas ---
 @Composable
 fun AppLogoCanvas(
     modifier: Modifier = Modifier,
     animationTrigger: Boolean = true
 ) {
-    val emeraldColor = LivingTealPrimary
-    val orangeColor = LivingOrangeSecondary
-
     val scale by animateFloatAsState(
         targetValue = if (animationTrigger) 1f else 0.85f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
@@ -68,53 +72,172 @@ fun AppLogoCanvas(
     Box(
         modifier = modifier
             .size(100.dp)
-            .drawBehind {
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(LivingTealPrimary.copy(alpha = 0.25f), Color.Transparent),
-                        center = center,
-                        radius = size.width / 1.1f
-                    )
-                )
-            },
+            .scale(scale),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.size(64.dp * scale)) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
             val width = size.width
             val height = size.height
+            val radius = minOf(width, height) / 2f
+            val cx = width / 2f
+            val cy = height / 2f
 
-            // Cozy Roof Top and modern door accents
-            // Outer House framing
-            val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(width / 2f, height * 0.15f)
-                lineTo(width * 0.9f, height * 0.5f)
-                lineTo(width * 0.78f, height * 0.5f)
-                lineTo(width * 0.78f, height * 0.85f)
-                lineTo(width * 0.22f, height * 0.85f)
-                lineTo(width * 0.22f, height * 0.5f)
-                lineTo(width * 0.1f, height * 0.5f)
-                close()
+            // 1. Solid Red Background Circle from user uploaded logo
+            drawCircle(
+                color = Color(0xFFFE2B2D),
+                radius = radius,
+                center = Offset(cx, cy)
+            )
+
+            // Scale factor to map virtual coordinate grid of 100x100 to the real size
+            val scaleFactor = radius * 2f / 100f
+
+            // 2. Chimney (white rectangle on the right slope of the roof)
+            val chimneyLeft = cx + (15f * scaleFactor)
+            val chimneyRight = cx + (25f * scaleFactor)
+            val chimneyTop = cy - (26f * scaleFactor)
+            val chimneyBottom = cy - (5f * scaleFactor)
+            
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(chimneyLeft, chimneyTop),
+                size = androidx.compose.ui.geometry.Size(chimneyRight - chimneyLeft, chimneyBottom - chimneyTop)
+            )
+
+            // 3. Roof Outer Outline Structure (the elegant white /\ shape with eaves)
+            val roofPath = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx - (38f * scaleFactor), cy + (1f * scaleFactor))
+                lineTo(cx, cy - (33f * scaleFactor))
+                lineTo(cx + (38f * scaleFactor), cy + (1f * scaleFactor))
             }
             drawPath(
-                path = path,
-                color = emeraldColor,
-                style = Stroke(width = 4.dp.toPx())
+                path = roofPath,
+                color = Color.White,
+                style = Stroke(width = 8f * scaleFactor, cap = StrokeCap.Round, join = StrokeJoin.Round)
             )
 
-            // Inner Accent Heart / Sunset Sun indicating "Living" with care
+            // 4. House Main Body (White block with a door cutout)
+            val houseLeft = cx - (26f * scaleFactor)
+            val houseRight = cx + (26f * scaleFactor)
+            val houseTop = cy + (1f * scaleFactor)
+            val houseBottom = cy + (34f * scaleFactor)
+            val bodyWidth = houseRight - houseLeft
+            val bodyHeight = houseBottom - houseTop
+
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(houseLeft, houseTop),
+                size = androidx.compose.ui.geometry.Size(bodyWidth, bodyHeight)
+            )
+
+            // 5. Red Door Cutout in bottom center
+            val doorWidth = 16f * scaleFactor
+            val doorHeight = 17f * scaleFactor
+            val doorLeft = cx - (8f * scaleFactor)
+            val doorTop = houseBottom - doorHeight
+
+            drawRect(
+                color = Color(0xFFFE2B2D),
+                topLeft = Offset(doorLeft, doorTop),
+                size = androidx.compose.ui.geometry.Size(doorWidth, doorHeight + 1f)
+            )
+
+            // 6. Signature circular badge on top of chimney
+            val badgeX = cx + (20f * scaleFactor)
+            val badgeY = cy - (32f * scaleFactor)
+            val badgeRadius = 13f * scaleFactor
+
             drawCircle(
-                color = orangeColor,
-                radius = 10.dp.toPx(),
-                center = Offset(width / 2f, height * 0.52f)
+                color = Color.White,
+                radius = badgeRadius,
+                center = Offset(badgeX, badgeY)
             )
 
-            // Dynamic base waves
-            drawLine(
-                color = emeraldColor.copy(alpha = 0.7f),
-                start = Offset(width * 0.15f, height * 0.92f),
-                end = Offset(width * 0.85f, height * 0.92f),
-                strokeWidth = 3.dp.toPx()
+            // Multicolored Ring segments on the badge (yellow, red, black/grey)
+            val arcRect = androidx.compose.ui.geometry.Rect(
+                badgeX - badgeRadius + (1f * scaleFactor),
+                badgeY - badgeRadius + (1f * scaleFactor),
+                badgeX + badgeRadius - (1f * scaleFactor),
+                badgeY + badgeRadius - (1f * scaleFactor)
             )
+            
+            drawArc(
+                color = Color(0xFFE53935), // Red
+                startAngle = -30f,
+                sweepAngle = 120f,
+                useCenter = false,
+                topLeft = arcRect.topLeft,
+                size = arcRect.size,
+                style = Stroke(width = 2f * scaleFactor)
+            )
+            
+            drawArc(
+                color = Color(0xFFFFEB3B), // Yellow
+                startAngle = 90f,
+                sweepAngle = 120f,
+                useCenter = false,
+                topLeft = arcRect.topLeft,
+                size = arcRect.size,
+                style = Stroke(width = 2f * scaleFactor)
+            )
+            
+            drawArc(
+                color = Color(0xFF212121), // Black/Dimgrey
+                startAngle = 210f,
+                sweepAngle = 120f,
+                useCenter = false,
+                topLeft = arcRect.topLeft,
+                size = arcRect.size,
+                style = Stroke(width = 2f * scaleFactor)
+            )
+
+            // Drawing "c5de5" using Android Native Canvas calls inside the Compose DrawScope
+            drawContext.canvas.nativeCanvas.apply {
+                val density = scaleFactor
+
+                // Big central "5"
+                val paintFive = Paint().apply {
+                    color = android.graphics.Color.BLACK
+                    textSize = 14f * density
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                    isAntiAlias = true
+                    textAlign = Paint.Align.CENTER
+                }
+                val bounds = Rect()
+                paintFive.getTextBounds("5", 0, 1, bounds)
+                val textHeight = bounds.height()
+                drawText("5", badgeX, badgeY + (textHeight / 2f), paintFive)
+
+                // Left "c"
+                val paintC = Paint().apply {
+                    color = android.graphics.Color.BLACK
+                    textSize = 4.5f * density
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                    isAntiAlias = true
+                    textAlign = Paint.Align.RIGHT
+                }
+                drawText("c", badgeX - (4.5f * density), badgeY + (textHeight / 2.5f), paintC)
+
+                // Right "de5"
+                val paintDe5 = Paint().apply {
+                    color = android.graphics.Color.BLACK
+                    textSize = 4.5f * density
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                    isAntiAlias = true
+                    textAlign = Paint.Align.LEFT
+                }
+                drawText("de5", badgeX + (4.5f * density), badgeY + (textHeight / 2.5f), paintDe5)
+                
+                // Small gray top date "2021"
+                val paintTopText = Paint().apply {
+                    color = android.graphics.Color.GRAY
+                    textSize = 1.8f * density
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.NORMAL)
+                    isAntiAlias = true
+                    textAlign = Paint.Align.CENTER
+                }
+                drawText("2021", badgeX, badgeY - (8f * density), paintTopText)
+            }
         }
     }
 }
@@ -206,7 +329,7 @@ fun MetricLineChart(
     modifier: Modifier = Modifier,
     lineColor: Color = LivingTealPrimary
 ) {
-    if (points.isEmpty()) return
+    if (points.size <= 1) return
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height

@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
-    @Query("SELECT * FROM users WHERE email = :email LIMIT 1")
+    @Query("SELECT * FROM users WHERE LOWER(email) = LOWER(:email) LIMIT 1")
     suspend fun getUserByEmail(email: String): User?
 
     @Query("SELECT * FROM users WHERE id = :id")
@@ -60,6 +60,9 @@ interface PropertyDao {
 
 @Dao
 interface ApplicationDao {
+    @Query("SELECT * FROM applications ORDER BY id DESC")
+    fun getAllApplicationsFlow(): Flow<List<Application>>
+
     @Query("SELECT * FROM applications WHERE tenantId = :tenantId ORDER BY id DESC")
     fun getApplicationsByTenant(tenantId: Int): Flow<List<Application>>
 
@@ -134,7 +137,7 @@ interface ReviewDao {
         Payment::class,
         Review::class
     ],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class LivingDatabase : RoomDatabase() {

@@ -33,6 +33,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -820,6 +822,7 @@ fun PropertyDetailsAndApplicationView(
 
     var userReviewText by remember { mutableStateOf("") }
     var userRatingValue by remember { mutableStateOf(5) }
+    var activePlayingVideoUrl by remember { mutableStateOf<String?>(null) }
 
     if (property == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -968,16 +971,290 @@ fun PropertyDetailsAndApplicationView(
                     )
                 }
 
-                // Interactive gallery row
-                Text(text = "Visual Gallery Collection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(imageList) { img ->
-                        Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                        ) {
-                            AsyncImage(model = img, contentDescription = "Gallery item", contentScale = ContentScale.Crop)
+                // Interactive media section (photos and videos under 1GB)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(text = "Visual Gallery Collection (Photos & Videos)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    
+                    Text(text = "Photos:", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(imageList) { img ->
+                            Box(
+                                modifier = Modifier
+                                    .size(115.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                            ) {
+                                AsyncImage(
+                                    model = img, 
+                                    contentDescription = "Gallery item", 
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
+
+                    // Check for video items
+                    val videos = p.videoUrls.split(",").filter { it.isNotEmpty() }
+                    val sizes = p.videoSizesStr.split(",").filter { it.isNotEmpty() }
+                    
+                    if (videos.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "Video Walkthroughs (Optimized Stream <1GB):", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                        
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(videos.size) { index ->
+                                val vUrl = videos[index]
+                                val vSize = sizes.getOrElse(index) { "124 MB" }
+                                val vName = "Home Tour Walkthrough ${index + 1}"
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .width(220.dp)
+                                        .height(120.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color.Black)
+                                        .clickable { activePlayingVideoUrl = vUrl }
+                                ) {
+                                    // Soft blur simulated video cover background
+                                    AsyncImage(
+                                        model = imageList.firstOrNull() ?: "",
+                                        contentDescription = "Video preview",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().alpha(0.4f)
+                                    )
+                                    
+                                    // Play overlay layout
+                                    Column(
+                                        modifier = Modifier.fillMaxSize().padding(12.dp),
+                                        verticalArrangement = Arrangement.SpaceBetween,
+                                        horizontalAlignment = Alignment.Start
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(text = "VIDEO PREVIEW", fontSize = 8.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                        
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(text = vName, style = MaterialTheme.typography.labelMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                Text(text = "High definition • $vSize", style = MaterialTheme.typography.labelSmall, color = Color.LightGray)
+                                            }
+                                            
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .background(LivingTealPrimary, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = "Play",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Interactive Video Player Simulator Dialog Overlay
+                if (activePlayingVideoUrl != null) {
+                    var isPlayingState by remember { mutableStateOf(true) }
+                    var elapsedSecs by remember { mutableStateOf(0) }
+                    
+                    LaunchedEffect(isPlayingState) {
+                        while (isPlayingState) {
+                            kotlinx.coroutines.delay(1000)
+                            elapsedSecs = (elapsedSecs + 1) % 155
+                        }
+                    }
+
+                    AlertDialog(
+                        onDismissRequest = { activePlayingVideoUrl = null },
+                        title = {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(imageVector = Icons.Default.Movie, contentDescription = null, tint = LivingTealPrimary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Secured Video Stream", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .background(LivingTealPrimary.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(text = "LTE OPTIMIZED", fontSize = 8.sp, color = LivingTealPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        },
+                        text = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.Black),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    // Fake lens loop simulation
+                                    AsyncImage(
+                                        model = imageList.firstOrNull() ?: "",
+                                        contentDescription = "Video play action",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().alpha(0.6f)
+                                    )
+
+                                    Column(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalArrangement = Arrangement.Center,
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        if (isPlayingState) {
+                                            CircularProgressIndicator(color = LivingTealPrimary, modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text(text = "Streaming Home Tour Walkthrough...", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                                        } else {
+                                            Icon(imageVector = Icons.Default.PauseCircle, contentDescription = "Paused", tint = Color.White, modifier = Modifier.size(48.dp))
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(text = "Video Paused", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                                        }
+                                    }
+
+                                    // Controls overlay bottom
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .align(Alignment.BottomCenter)
+                                            .background(Color.Black.copy(alpha = 0.6f))
+                                            .padding(8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(onClick = { isPlayingState = !isPlayingState }) {
+                                            Icon(
+                                                imageVector = if (isPlayingState) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = "Play/Pause",
+                                                tint = Color.White
+                                            )
+                                        }
+                                        
+                                        // Slider simulation
+                                        LinearProgressIndicator(
+                                            progress = { elapsedSecs / 155f },
+                                            modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                                            color = LivingTealPrimary,
+                                            trackColor = Color.DarkGray
+                                        )
+
+                                        val minutesText = "%02d:%02d / 02:35".format(elapsedSecs / 60, elapsedSecs % 60)
+                                        Text(text = minutesText, style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "This photo & video feed is served from secure bandwidth CDNs under 1GB file size policy to support rapid mobile data load across Kampala.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { activePlayingVideoUrl = null }) {
+                                Text("Close Player", color = LivingTealPrimary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    )
+                }
+
+                // Ugandan Kampala Custom Domestic Utility Systems checklist
+                Text(text = "Premium Kampala Domestic Configuration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Water SourceNWSC
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(imageVector = Icons.Default.WaterDrop, contentDescription = "Water Source", tint = LivingTealPrimary, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(text = "Water Supply System", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text(text = p.waterSource.ifEmpty { "NWSC Running Water Tap Connected" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    // Electricity power metering
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(imageVector = Icons.Default.Bolt, contentDescription = "Power Billing", tint = LivingTealPrimary, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(text = "Electricity Metering", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text(text = p.electricityMeter.ifEmpty { "Umeme Yaka Pre-paid Meter" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    // Access Road Quality
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(imageVector = Icons.Default.Navigation, contentDescription = "Access Road", tint = LivingTealPrimary, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(text = "Road Construction Connection", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text(text = p.roadAccess.ifEmpty { "Paved Tarmac Access Road" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    // Compounds wall gate fence
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(
+                            imageVector = if (p.securityFence) Icons.Default.Security else Icons.Default.AddHome, 
+                            contentDescription = "Fence Security", 
+                            tint = LivingTealPrimary, 
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(text = "Secure Perimeter Compound", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            val wallText = if (p.securityFence) "High perimeter brick-wall surround and secure lockable gated entry" else "Open shared compound fencing"
+                            Text(text = wallText, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+
+                    // Installments cycle
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(imageVector = Icons.Default.CalendarMonth, contentDescription = "Payment terms", tint = LivingTealPrimary, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text(text = "Rental Installments Billing Plan", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text(text = p.paymentInstallments.ifEmpty { "3 Months standard term upfront" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

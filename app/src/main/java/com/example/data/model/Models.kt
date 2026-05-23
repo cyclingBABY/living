@@ -14,8 +14,41 @@ data class User(
     val verificationState: String, // "REJECTED", "PENDING", "VERIFIED"
     val rating: Float = 5.0f,
     val companyName: String = "",
-    val joinedDate: String = "May 2026"
-)
+    val joinedDate: String = "May 2026",
+    val joinedTimestamp: Long = System.currentTimeMillis(),
+    val subscriptionExpiry: Long = 0L
+) {
+    fun hasActiveAccess(): Boolean {
+        if (role == "ADMIN") return true
+        if (id == -1 || email == "guest@living.com") return true // Guest viewing is free
+        
+        val now = System.currentTimeMillis()
+        val trialDuration = 7 * 24 * 60 * 60 * 1000L // 1 week
+        val trialExpired = now > (joinedTimestamp + trialDuration)
+        
+        if (!trialExpired) return true
+        return subscriptionExpiry > now
+    }
+
+    fun getSubscriptionStatusText(): String {
+        if (role == "ADMIN") return "Administrator Active"
+        if (id == -1 || email == "guest@living.com") return "Guest Account (Viewing Free)"
+        
+        val now = System.currentTimeMillis()
+        val trialDuration = 7 * 24 * 60 * 60 * 1000L
+        val trialEndTime = joinedTimestamp + trialDuration
+        
+        return if (now < trialEndTime) {
+            val daysLeft = ((trialEndTime - now) / (24 * 60 * 60 * 1000L)) + 1
+            "Free Trial: $daysLeft days left"
+        } else if (subscriptionExpiry > now) {
+            val daysLeft = ((subscriptionExpiry - now) / (24 * 60 * 60 * 1000L)) + 1
+            "Active subscription: $daysLeft days left"
+        } else {
+            "Trial and Subscription Expired"
+        }
+    }
+}
 
 @Entity(tableName = "properties")
 data class Property(
@@ -43,7 +76,14 @@ data class Property(
     val nearbySchools: String = "Greenwood High, Westside Academy",
     val nearbyHospitals: String = "City General, St. Jude Medical",
     val ratingsCount: Int = 0,
-    val averageRating: Float = 0.0f
+    val averageRating: Float = 0.0f,
+    val videoUrls: String = "",
+    val videoSizesStr: String = "",
+    val waterSource: String = "NWSC Running Water",
+    val electricityMeter: String = "Umeme Yaka Pre-paid Meter",
+    val roadAccess: String = "Paved Tarmac Access Road",
+    val securityFence: Boolean = true,
+    val paymentInstallments: String = "3 Months Upfront"
 )
 
 @Entity(tableName = "applications")

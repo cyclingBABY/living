@@ -8,7 +8,10 @@ import com.example.data.repository.LivingRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlin.OptIn
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class LivingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = LivingRepository(application)
@@ -113,25 +116,16 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
     // System level Apps for Admin
     val allApplications: StateFlow<List<com.example.data.model.Application>> = _currentUser.flatMapLatest { user ->
         if (user == null || user.role != "ADMIN") flowOf(emptyList())
-        else {
-            // Combine all properties applications or fetch directly is ideal
-            // We can just query applications of all landlords or simulate.
-            // Let's create landlord applications flow or seed data.
-            // Since we know landlord 1 or 2 are present, we could do combine. Let's just monitor all landlords applications
-            repository.getApplicationsByLandlord(2).combine(repository.getApplicationsByLandlord(3)) { a, b ->
-                a + b
-            }
-        }
+        else repository.getAllApplicationsFlow()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Active Messaging State
     val activeChatPartnerId = MutableStateFlow<Int?>(null)
-    val activeConversation: StateFlow<List<Message>> = combine(
-        _currentUser,
-        activeChatPartnerId
-    ) { user, partnerId ->
-        if (user == null || partnerId == null) emptyList()
-        else repository.getConversationFlow(user.id, partnerId).first()
+    val activeConversation: StateFlow<List<Message>> = _currentUser.flatMapLatest { user ->
+        activeChatPartnerId.flatMapLatest { partnerId ->
+            if (user == null || partnerId == null) flowOf(emptyList())
+            else repository.getConversationFlow(user.id, partnerId)
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Conversations List (Inbox) - Fetch unique messages grouped by contact
@@ -177,67 +171,168 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
     )
     val notifications: StateFlow<List<String>> = _notifications.asStateFlow()
 
+    // Local persistence helper for remembering logins
+    private val prefs = application.getSharedPreferences("living_auth_prefs", android.content.Context.MODE_PRIVATE)
+
+    fun saveRememberedUser(email: String) {
+        prefs.edit().putString("remembered_email", email).apply()
+    }
+
+    fun clearRememberedUser() {
+        prefs.edit().remove("remembered_email").apply()
+    }
+
+    fun getRememberedEmail(): String? {
+        return prefs.getString("remembered_email", null)
+    }
+
+    fun tryPersistentLogin(onSuccess: () -> Unit, onFailure: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val email = getRememberedEmail()
+                if (!email.isNullOrEmpty()) {
+                    val user = repository.getUserByEmail(email)
+                    if (user != null) {
+                        _currentUser.value = user
+                        addNotification("Welcome back! Auto-logged in as ${user.name}.")
+                        onSuccess()
+                    } else {
+                        onFailure()
+                    }
+                } else {
+                    onFailure()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onFailure()
+            }
+        }
+    }
+
     init {
         // Run database initializer at launch
         viewModelScope.launch {
-            repository.seedInitialData()
+            try {
+                repository.seedInitialData()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
     fun addNotification(text: String) {
-        val current = _notifications.value.toMutableList()
-        current.add(0, text)
-        _notifications.value = current
+        try {
+            val current = _notifications.value.toMutableList()
+            current.add(0, text)
+            _notifications.value = current
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Google Sign-In Operation
+    fun loginWithGoogle(email: String, name: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val normalizedEmail = email.trim().lowercase()
+                var user = repository.getUserByEmail(normalizedEmail)
+                
+                if (user == null) {
+                    // Register a premium Google account dynamically
+                    val isStuart = normalizedEmail == "stuartdonsms@gmail.com"
+                    val googleUser = User(
+                        email = normalizedEmail,
+                        name = name,
+                        phone = "N/A",
+                        role = if (isStuart) "ADMIN" else "TENANT",
+                        avatarUrl = if (isStuart) {
+                            "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&q=80"
+                        } else {
+                            "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80"
+                        },
+                        verificationState = "VERIFIED",
+                        rating = 5.0f,
+                        companyName = if (isStuart) "Living Corporate Admin" else ""
+                    )
+                    val newId = repository.insertUser(googleUser).toInt()
+                    user = googleUser.copy(id = newId)
+                } else if (normalizedEmail == "stuartdonsms@gmail.com" && user.role != "ADMIN") {
+                    val updatedUser = user.copy(
+                        role = "ADMIN",
+                        verificationState = "VERIFIED",
+                        companyName = "Living Corporate Admin"
+                    )
+                    repository.updateUser(updatedUser)
+                    user = updatedUser
+                }
+                
+                _currentUser.value = user
+                saveRememberedUser(normalizedEmail)
+                addNotification("Google continues seamlessly! Welcome back ${user.name}!")
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // Authentication Operations
     fun login(email: String, authPass: String, onSuccess: () -> Unit, onFailure: (String) -> Unit) {
         viewModelScope.launch {
-            val normalizedEmail = email.trim().lowercase()
-            if (normalizedEmail == "stuartdonsms@gmail.com") {
-                if (authPass != "code5_12345") {
-                    onFailure("Incorrect password for admin access.")
+            try {
+                val normalizedEmail = email.trim().lowercase()
+                
+                // Unified Admin login cases
+                if (normalizedEmail == "stuartdonsms@gmail.com" || normalizedEmail == "admin@living.com") {
+                    if (normalizedEmail == "stuartdonsms@gmail.com" && authPass != "code5_12345") {
+                        onFailure("Incorrect password for admin access.")
+                        return@launch
+                    }
+                    
+                    var user = repository.getUserByEmail(normalizedEmail)
+                    if (user == null) {
+                        val adminUser = User(
+                            email = normalizedEmail,
+                            name = if (normalizedEmail == "admin@living.com") "Sarah Sterling" else "Stuart Don (Admin)",
+                            phone = "1-646-555-4421",
+                            role = "ADMIN",
+                            avatarUrl = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&q=80",
+                            verificationState = "VERIFIED",
+                            rating = 5.0f,
+                            companyName = "Living Corporate Admin"
+                        )
+                        val newId = repository.insertUser(adminUser).toInt()
+                        user = adminUser.copy(id = newId)
+                    } else if (user.role != "ADMIN") {
+                        val updatedUser = user.copy(
+                            role = "ADMIN",
+                            verificationState = "VERIFIED",
+                            companyName = "Living Corporate Admin",
+                            name = if (normalizedEmail == "admin@living.com") "Sarah Sterling" else "Stuart Don (Admin)"
+                        )
+                        repository.updateUser(updatedUser)
+                        user = updatedUser
+                    }
+                    _currentUser.value = user
+                    saveRememberedUser(normalizedEmail)
+                    addNotification("Welcome back, Administrator ${user.name}!")
+                    onSuccess()
                     return@launch
                 }
-                var user = repository.getUserByEmail(normalizedEmail)
-                if (user == null) {
-                    val adminUser = User(
-                        email = "stuartdonsms@gmail.com",
-                        name = "Stuart Don (Admin)",
-                        phone = "1-646-555-4421",
-                        role = "ADMIN",
-                        avatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80",
-                        verificationState = "VERIFIED",
-                        rating = 5.0f,
-                        companyName = "Living Corporate Admin"
-                    )
-                    val newId = repository.insertUser(adminUser).toInt()
-                    user = adminUser.copy(id = newId)
-                } else if (user.role != "ADMIN") {
-                    val updatedUser = user.copy(
-                        role = "ADMIN",
-                        verificationState = "VERIFIED",
-                        companyName = "Living Corporate Admin",
-                        name = "Stuart Don (Admin)"
-                    )
-                    repository.updateUser(updatedUser)
-                    user = updatedUser
-                }
-                _currentUser.value = user
-                addNotification("Welcome back, Administrator ${user.name}!")
-                onSuccess()
-                return@launch
-            }
 
-            // Standard login behavior
-            val user = repository.getUserByEmail(email)
-            if (user != null) {
-                // In demo, password check can accept matching simple formats
-                _currentUser.value = user
-                addNotification("Welcome back, ${user.name}! Successful login.")
-                onSuccess()
-            } else {
-                onFailure("No account registered with $email. Please register.")
+                // Standard login behavior
+                val user = repository.getUserByEmail(normalizedEmail)
+                if (user != null) {
+                    _currentUser.value = user
+                    saveRememberedUser(normalizedEmail)
+                    addNotification("Welcome back, ${user.name}! Successful login.")
+                    onSuccess()
+                } else {
+                    onFailure("No account registered with $email. Please register.")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onFailure("An unexpected error occurred: ${e.message}")
             }
         }
     }
@@ -252,62 +347,174 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
         onFailure: (String) -> Unit
     ) {
         viewModelScope.launch {
-            val normalizedEmail = email.trim().lowercase()
-            val existing = repository.getUserByEmail(email)
-            if (existing != null) {
-                onFailure("Account with this email already exists.")
-                return@launch
+            try {
+                val normalizedEmail = email.trim().lowercase()
+                val existing = repository.getUserByEmail(normalizedEmail)
+                if (existing != null) {
+                    onFailure("Account with this email already exists.")
+                    return@launch
+                }
+
+                // Create beautiful profile picture avatar based on role
+                val targetRole = if (normalizedEmail == "stuartdonsms@gmail.com") "ADMIN" else role
+                val isVerified = if (targetRole == "ADMIN") "VERIFIED" else "PENDING"
+                val randomNum = (11..99).random()
+                val avatarUrl = if (targetRole == "TENANT") {
+                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"
+                } else {
+                    "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&q=80"
+                }
+
+                val newUser = User(
+                    email = normalizedEmail,
+                    name = name,
+                    phone = phone,
+                    role = targetRole,
+                    avatarUrl = avatarUrl,
+                    verificationState = isVerified,
+                    companyName = companyName,
+                    rating = 5.0f
+                )
+
+                val newId = repository.insertUser(newUser).toInt()
+                val savedUser = newUser.copy(id = newId)
+                _currentUser.value = savedUser
+                saveRememberedUser(normalizedEmail)
+                addNotification("Account created! Welcome ${savedUser.name} to the community.")
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                onFailure("Registration failed: ${e.message}")
             }
-
-            // Create beautiful profile picture avatar based on role
-            val targetRole = if (normalizedEmail == "stuartdonsms@gmail.com") "ADMIN" else role
-            val isVerified = if (targetRole == "ADMIN") "VERIFIED" else "PENDING"
-            val randomNum = (11..99).random()
-            val avatarUrl = if (targetRole == "TENANT") {
-                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"
-            } else {
-                "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&q=80"
-            }
-
-            val newUser = User(
-                email = email,
-                name = name,
-                phone = phone,
-                role = targetRole,
-                avatarUrl = avatarUrl,
-                verificationState = isVerified,
-                companyName = companyName,
-                rating = 5.0f
-            )
-
-            val newId = repository.insertUser(newUser).toInt()
-            val savedUser = newUser.copy(id = newId)
-            _currentUser.value = savedUser
-            addNotification("Account created! Welcome ${savedUser.name} to the community.")
-            onSuccess()
         }
     }
 
     fun continueAsGuestUser(onSuccess: () -> Unit) {
-        val guestUser = User(
-            id = -1,
-            email = "guest@living.com",
-            name = "Guest User",
-            phone = "N/A",
-            role = "TENANT",
-            avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
-            verificationState = "REJECTED",
-            rating = 5.0f
-        )
-        _currentUser.value = guestUser
-        addNotification("Browsing Living catalog as Guest.")
-        onSuccess()
+        try {
+            val guestUser = User(
+                id = -1,
+                email = "guest@living.com",
+                name = "Guest User",
+                phone = "N/A",
+                role = "TENANT",
+                avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+                verificationState = "REJECTED",
+                rating = 5.0f
+            )
+            _currentUser.value = guestUser
+            addNotification("Browsing Living catalog as Guest.")
+            onSuccess()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     fun logout(onSuccess: () -> Unit) {
-        _currentUser.value = null
-        addNotification("Logged out successfully.")
-        onSuccess()
+        try {
+            _currentUser.value = null
+            clearRememberedUser()
+            addNotification("Logged out successfully.")
+            onSuccess()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Update Profile details
+    fun updateUserProfile(
+        name: String,
+        phone: String,
+        companyName: String,
+        avatarUrl: String,
+        onSuccess: () -> Unit
+    ) {
+        val user = _currentUser.value ?: return
+        viewModelScope.launch {
+            try {
+                val updated = user.copy(
+                    name = name,
+                    phone = phone,
+                    companyName = companyName,
+                    avatarUrl = avatarUrl
+                )
+                repository.updateUser(updated)
+                _currentUser.value = updated
+                addNotification("Status: User profiles successfully updated.")
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                addNotification("Error: Profile update failed.")
+            }
+        }
+    }
+
+    // Delete User Account
+    fun deleteUserAccount(onSuccess: () -> Unit) {
+        val user = _currentUser.value ?: return
+        viewModelScope.launch {
+            try {
+                repository.deleteUser(user)
+                _currentUser.value = null
+                clearRememberedUser()
+                addNotification("Account successfully deleted. See you again!")
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                addNotification("Error: Could not delete user account.")
+            }
+        }
+    }
+
+    // Subscription actions
+    fun purchaseSubscription(months: Int, onSuccess: () -> Unit) {
+        val user = _currentUser.value ?: return
+        viewModelScope.launch {
+            try {
+                val currentExpiry = if (user.subscriptionExpiry > System.currentTimeMillis()) user.subscriptionExpiry else System.currentTimeMillis()
+                val addedDuration = months * 30L * 24 * 60 * 60 * 1000
+                val updated = user.copy(
+                    subscriptionExpiry = currentExpiry + addedDuration
+                )
+                repository.updateUser(updated)
+                _currentUser.value = updated
+                addNotification("Subscription renewed successfully for $months month(s)!")
+                onSuccess()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Privacy Settings and Persisted Options
+    private val privacyPrefs = application.getSharedPreferences("living_privacy_prefs", android.content.Context.MODE_PRIVATE)
+    
+    val isRatingHidden = MutableStateFlow(privacyPrefs.getBoolean("is_rating_hidden", false))
+    val isDmsDisabled = MutableStateFlow(privacyPrefs.getBoolean("is_dms_disabled", false))
+    val isPhoneHidden = MutableStateFlow(privacyPrefs.getBoolean("is_phone_hidden", false))
+    val isLocationEnabled = MutableStateFlow(privacyPrefs.getBoolean("is_location_enabled", true))
+
+    fun toggleRatingHidden(hidden: Boolean) {
+        isRatingHidden.value = hidden
+        privacyPrefs.edit().putBoolean("is_rating_hidden", hidden).apply()
+        addNotification("Privacy: Community ratings is now ${if (hidden) "hidden from public view" else "visible to public"}.")
+    }
+
+    fun toggleDmsDisabled(disabled: Boolean) {
+        isDmsDisabled.value = disabled
+        privacyPrefs.edit().putBoolean("is_dms_disabled", disabled).apply()
+        addNotification("Privacy: Direct messaging ${if (disabled) "disabled for others" else "enabled"}.")
+    }
+
+    fun togglePhoneHidden(hidden: Boolean) {
+        isPhoneHidden.value = hidden
+        privacyPrefs.edit().putBoolean("is_phone_hidden", hidden).apply()
+        addNotification("Privacy: Listing contact number is ${if (hidden) "hidden" else "public"}.")
+    }
+
+    fun toggleLocationEnabled(enabled: Boolean) {
+        isLocationEnabled.value = enabled
+        privacyPrefs.edit().putBoolean("is_location_enabled", enabled).apply()
+        addNotification("Privacy: Location matches are ${if (enabled) "active" else "inactive"}.")
     }
 
     // Property Saved State Action
@@ -460,6 +667,13 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
         pet: Boolean,
         wifi: Boolean,
         security: Boolean,
+        videoUrls: String = "",
+        videoSizesStr: String = "",
+        waterSource: String = "NWSC Running Water",
+        electricityMeter: String = "Umeme Yaka Pre-paid Meter",
+        roadAccess: String = "Paved Tarmac Access Road",
+        securityFence: Boolean = true,
+        paymentInstallments: String = "3 Months Upfront",
         onSuccess: () -> Unit
     ) {
         val user = _currentUser.value ?: return
@@ -482,7 +696,14 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
                 wifi = wifi,
                 security = security,
                 landlordId = user.id,
-                isApproved = false // Pending approval by Admin
+                isApproved = false, // Pending approval by Admin
+                videoUrls = videoUrls,
+                videoSizesStr = videoSizesStr,
+                waterSource = waterSource,
+                electricityMeter = electricityMeter,
+                roadAccess = roadAccess,
+                securityFence = securityFence,
+                paymentInstallments = paymentInstallments
             )
             repository.insertProperty(newProp)
             addNotification("Property listed! Pending administrator approval queue.")
@@ -546,5 +767,80 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
         filterFurnished.value = false
         filterParking.value = false
         filterSecurity.value = false
+    }
+
+    // Process UGX subscription payment
+    fun paySubscription(
+        paymentMethod: String,
+        amount: Double,
+        phoneNumber: String,
+        onSuccess: () -> Unit
+    ) {
+        val user = _currentUser.value ?: return
+        viewModelScope.launch {
+            val qrcodeStr = "LIVING-SUB-QR-" + UUID.randomUUID().toString().take(8).uppercase()
+            val newBill = Payment(
+                propertyId = 0,
+                tenantId = user.id,
+                amount = amount,
+                paymentType = "Account Subscription to keep account active",
+                paymentMethod = "$paymentMethod ($phoneNumber)",
+                date = "2026-05-23",
+                qrcode = qrcodeStr,
+                status = "Success"
+            )
+            repository.insertPayment(newBill)
+            
+            val currentExpiry = if (user.subscriptionExpiry > System.currentTimeMillis()) {
+                user.subscriptionExpiry
+            } else {
+                System.currentTimeMillis()
+            }
+            val oneMonth = 30L * 24 * 60 * 60 * 1000L
+            val updatedUser = user.copy(subscriptionExpiry = currentExpiry + oneMonth)
+            repository.updateUser(updatedUser)
+            _currentUser.value = updatedUser
+            
+            addNotification("Subscription of ${amount.toInt()} UGX processed successfully via $paymentMethod!")
+            onSuccess()
+        }
+    }
+
+    // Impersonate / Role switcher capabilities
+    private val _impersonatorAdminUser = MutableStateFlow<User?>(null)
+    val impersonatorAdminUser: StateFlow<User?> = _impersonatorAdminUser.asStateFlow()
+
+    fun impersonateUser(targetUser: User) {
+        val current = _currentUser.value
+        // If we aren't already impersonating, remember the actual admin
+        if (_impersonatorAdminUser.value == null && current?.role == "ADMIN") {
+            _impersonatorAdminUser.value = current
+        }
+        _currentUser.value = targetUser
+        addNotification("Masquerading as ${targetUser.name} (${targetUser.role})")
+    }
+
+    fun stopImpersonating() {
+        val admin = _impersonatorAdminUser.value
+        if (admin != null) {
+            _currentUser.value = admin
+            _impersonatorAdminUser.value = null
+            addNotification("Returned to Administrator Cockpit")
+        }
+    }
+
+    fun updateUserRole(userId: Int, newRole: String) {
+        viewModelScope.launch {
+            allUsers.value.find { it.id == userId }?.let { user ->
+                val updated = user.copy(role = newRole)
+                repository.updateUser(updated)
+                addNotification("User ${user.name} role changed to $newRole")
+                
+                // If the user we updated is the logged-in session, refresh it
+                if (_currentUser.value?.id == userId) {
+                    _currentUser.value = updated
+                }
+            }
+        }
     }
 }

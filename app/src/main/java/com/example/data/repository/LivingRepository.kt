@@ -43,6 +43,7 @@ class LivingRepository(private val context: Context) {
     suspend fun getUserByIdSync(id: Int): User? = userDao.getUserByIdSync(id)
     suspend fun insertUser(user: User): Long = userDao.insertUser(user)
     suspend fun updateUser(user: User) = userDao.updateUser(user)
+    suspend fun deleteUser(user: User) = userDao.deleteUser(user)
     fun getAllUsers(): Flow<List<User>> = userDao.getAllUsers()
 
     // --- Properties ---
@@ -56,6 +57,7 @@ class LivingRepository(private val context: Context) {
     suspend fun deleteProperty(property: Property) = propertyDao.deleteProperty(property)
 
     // --- Applications ---
+    fun getAllApplicationsFlow(): Flow<List<Application>> = applicationDao.getAllApplicationsFlow()
     fun getApplicationsByTenant(tenantId: Int): Flow<List<Application>> = applicationDao.getApplicationsByTenant(tenantId)
     fun getApplicationsByLandlord(landlordId: Int): Flow<List<Application>> = applicationDao.getApplicationsByLandlord(landlordId)
     fun getApplicationsByProperty(propertyId: Int): Flow<List<Application>> = applicationDao.getApplicationsByProperty(propertyId)
@@ -178,9 +180,68 @@ class LivingRepository(private val context: Context) {
 
     // --- Seeding of Initial Data ---
     suspend fun seedInitialData() {
-        // Only seed if users table is empty
-        val existingUsers = userDao.getAllUsers().first()
-        if (existingUsers.isNotEmpty()) return
+        withContext(Dispatchers.IO) {
+            // Only seed if users table is empty
+            val existingUsers = userDao.getAllUsers().first()
+        if (existingUsers.isNotEmpty()) {
+            val existingProps = propertyDao.getAllPropertiesFlow().first()
+            if (existingProps.none { it.title == "Aesthetic Boho Garden Studio" }) {
+                val lId = existingUsers.firstOrNull { it.role == "LANDLORD" }?.id ?: 2
+                val studio1 = Property(
+                    title = "Aesthetic Boho Garden Studio",
+                    description = "Charming light-filled studio surrounded by climbing ivy and sunlit window gardens. Features warm oak timber, exposed red-brick walls, custom hand-woven textiles, and a private wooden terrace perfect for morning yoga.",
+                    rent = 1200.0,
+                    deposit = 1200.0,
+                    imageUrls = "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=800&q=80",
+                    address = "312 Rosewood Lane, Austin, TX",
+                    lat = 30.2672,
+                    lng = -97.7431,
+                    houseType = "Studio",
+                    bedrooms = 1,
+                    bathrooms = 1,
+                    furnished = true,
+                    parking = true,
+                    petFriendly = true,
+                    wifi = true,
+                    security = true,
+                    landlordId = lId,
+                    isApproved = true,
+                    isPromoted = true,
+                    nearbySchools = "Austin High, Trinity Episcopal",
+                    nearbyHospitals = "St. David's Medical, Dell Seton Medical",
+                    ratingsCount = 3,
+                    averageRating = 4.8f
+                )
+                val studio2 = Property(
+                    title = "Neo-Tokyo Smart Micro-Studio",
+                    description = "Futuristic compact micro-studio maximizing every square inch using fold-away multi-purpose smart furniture. Equipped with high-speed fiber internet, voice-controlled smart ambient lights, a massive built-in laser projector screen, and automatic coffee machine.",
+                    rent = 950.0,
+                    deposit = 1000.0,
+                    imageUrls = "https://images.unsplash.com/photo-1502672016832-359000026622?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80",
+                    address = "89 Cyber Boulevard, Seattle, WA",
+                    lat = 47.6062,
+                    lng = -122.3321,
+                    houseType = "Studio",
+                    bedrooms = 1,
+                    bathrooms = 1,
+                    furnished = true,
+                    parking = false,
+                    petFriendly = false,
+                    wifi = true,
+                    security = true,
+                    landlordId = lId,
+                    isApproved = true,
+                    isPromoted = false,
+                    nearbySchools = "Seattle Academy, Summit High",
+                    nearbyHospitals = "Swedish Medical-First Hill, Virginia Mason",
+                    ratingsCount = 5,
+                    averageRating = 4.7f
+                )
+                propertyDao.insertProperty(studio1)
+                propertyDao.insertProperty(studio2)
+            }
+            return@withContext
+        }
 
         // 1. Seed Roles
         val admin = User(
@@ -306,6 +367,56 @@ class LivingRepository(private val context: Context) {
                 averageRating = 5.0f
             ),
             Property(
+                title = "Aesthetic Boho Garden Studio",
+                description = "Charming light-filled studio surrounded by climbing ivy and sunlit window gardens. Features warm oak timber, exposed red-brick walls, custom hand-woven textiles, and a private wooden terrace perfect for morning yoga.",
+                rent = 1200.0,
+                deposit = 1200.0,
+                imageUrls = "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=800&q=80",
+                address = "312 Rosewood Lane, Austin, TX",
+                lat = 30.2672,
+                lng = -97.7431,
+                houseType = "Studio",
+                bedrooms = 1,
+                bathrooms = 1,
+                furnished = true,
+                parking = true,
+                petFriendly = true,
+                wifi = true,
+                security = true,
+                landlordId = landlord2Id,
+                isApproved = true,
+                isPromoted = true,
+                nearbySchools = "Austin High, Trinity Episcopal",
+                nearbyHospitals = "St. David's Medical, Dell Seton Medical",
+                ratingsCount = 3,
+                averageRating = 4.8f
+            ),
+            Property(
+                title = "Neo-Tokyo Smart Micro-Studio",
+                description = "Futuristic compact micro-studio maximizing every square inch using fold-away multi-purpose smart furniture. Equipped with high-speed fiber internet, voice-controlled smart ambient lights, a massive built-in laser projector screen, and automatic coffee machine.",
+                rent = 950.0,
+                deposit = 1000.0,
+                imageUrls = "https://images.unsplash.com/photo-1502672016832-359000026622?auto=format&fit=crop&w=800&q=80,https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=800&q=80",
+                address = "89 Cyber Boulevard, Seattle, WA",
+                lat = 47.6062,
+                lng = -122.3321,
+                houseType = "Studio",
+                bedrooms = 1,
+                bathrooms = 1,
+                furnished = true,
+                parking = false,
+                petFriendly = false,
+                wifi = true,
+                security = true,
+                landlordId = landlord1Id,
+                isApproved = true,
+                isPromoted = false,
+                nearbySchools = "Seattle Academy, Summit High",
+                nearbyHospitals = "Swedish Medical-First Hill, Virginia Mason",
+                ratingsCount = 5,
+                averageRating = 4.7f
+            ),
+            Property(
                 title = "Suntide Coastal Apartment",
                 description = "Hear the seagulls and the crashing waves! Beautiful beachside light-filled apartment with a panoramic balcony, outdoor grill, and warm wooden accents. Unfurnished, letting you design your own ocean sanctuary.",
                 rent = 1800.0,
@@ -428,5 +539,6 @@ class LivingRepository(private val context: Context) {
         )
         reviewDao.insertReview(rev1)
         reviewDao.insertReview(rev2)
+        }
     }
 }

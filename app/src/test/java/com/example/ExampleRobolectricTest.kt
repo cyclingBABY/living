@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.core.app.ActivityScenario
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,5 +18,12 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
     assertEquals("Living", appName)
+  }
+
+  @Test
+  fun `launch main activity`() {
+    ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+      assert(true)
+    }
   }
 }
