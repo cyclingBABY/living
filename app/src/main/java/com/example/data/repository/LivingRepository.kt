@@ -36,6 +36,7 @@ class LivingRepository(private val context: Context) {
     private val savedPropertyDao = db.savedPropertyDao()
     private val paymentDao = db.paymentDao()
     private val reviewDao = db.reviewDao()
+    private val reelDao = db.reelDao()
 
     // --- Users ---
     suspend fun getUserByEmail(email: String): User? = userDao.getUserByEmail(email)
@@ -88,6 +89,12 @@ class LivingRepository(private val context: Context) {
     // --- Reviews ---
     fun getReviews(targetId: Int, targetType: String): Flow<List<Review>> = reviewDao.getReviews(targetId, targetType)
     suspend fun insertReview(review: Review): Long = reviewDao.insertReview(review)
+
+    // --- Reels ---
+    fun getAllReelsFlow(): Flow<List<Reel>> = reelDao.getAllReelsFlow()
+    suspend fun insertReel(reel: Reel): Long = reelDao.insertReel(reel)
+    suspend fun updateReel(reel: Reel) = reelDao.updateReel(reel)
+    suspend fun deleteReel(reel: Reel) = reelDao.deleteReel(reel)
 
     // --- Ask AI (Gemini Assistant API Integration with Safe Design Fallback) ---
     suspend fun askGeminiForRecommendations(promptInput: String, properties: List<Property>): String = withContext(Dispatchers.IO) {
@@ -539,6 +546,41 @@ class LivingRepository(private val context: Context) {
         )
         reviewDao.insertReview(rev1)
         reviewDao.insertReview(rev2)
+
+        // Seed Reels
+        val reel1 = Reel(
+            userId = landlord2Id,
+            userName = "Elizabeth Cho",
+            userAvatarUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&q=80",
+            userRole = "LANDLORD",
+            mediaUrl = "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=800&q=80",
+            mediaType = "PHOTO",
+            caption = "Cozy sunset lighting in our new Penthouse suites! 🛋️✨ Highly aesthetic boho look in Austin design quarters."
+        )
+        val reel2 = Reel(
+            userId = tenantId,
+            userName = "Stuart Don",
+            userAvatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80",
+            userRole = "TENANT",
+            mediaUrl = "https://www.youtube.com/watch?v=ScMzIvxBSi4",
+            mediaType = "LINK",
+            externalPlatform = "YouTube",
+            caption = "Testing our smart coffee system voice control! ☕🤖 Neo Tokyo Micro studio works absolutely flawlessly.",
+            likesCount = 5
+        )
+        val reel3 = Reel(
+            userId = landlord1Id,
+            userName = "Richard Vance",
+            userAvatarUrl = "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=120&q=80",
+            userRole = "LANDLORD",
+            mediaUrl = "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=800&q=80",
+            mediaType = "PHOTO",
+            caption = "Sky views from Manhattan Skyline Tower 🏙️. Floor-to-ceiling glass looks breathtaking. DM me for viewings.",
+            likesCount = 12
+        )
+        reelDao.insertReel(reel1)
+        reelDao.insertReel(reel2)
+        reelDao.insertReel(reel3)
         }
     }
 }

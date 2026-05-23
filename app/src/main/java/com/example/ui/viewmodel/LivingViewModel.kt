@@ -24,6 +24,10 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
     val allUsers: StateFlow<List<User>> = repository.getAllUsers()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // All Reels
+    val allReels: StateFlow<List<Reel>> = repository.getAllReelsFlow()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // All Properties
     val allProperties: StateFlow<List<Property>> = repository.getAllPropertiesFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -651,6 +655,30 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun submitUserReview(targetUserId: Int, rating: Int, comment: String) {
+        val user = _currentUser.value ?: return
+        viewModelScope.launch {
+            val rev = Review(
+                reviewerId = user.id,
+                reviewerName = user.name,
+                targetId = targetUserId,
+                targetType = "USER",
+                rating = rating,
+                comment = comment
+            )
+            repository.insertReview(rev)
+            
+            // Optionally update user average rating dynamically
+            val targetUser = repository.getUserByIdSync(targetUserId)
+            if (targetUser != null) {
+                val newRating = if (targetUser.rating == 0f || targetUser.rating == 5.0f /* seed default fallback */) rating.toFloat() else (targetUser.rating + rating.toFloat()) / 2f
+                val updatedTarget = targetUser.copy(rating = newRating)
+                repository.updateUser(updatedTarget)
+            }
+            addNotification("Member vouched successfully!")
+        }
+    }
+
     // Landlord: Add Property Listing
     fun landlordAddProperty(
         title: String,
@@ -841,6 +869,54 @@ class LivingViewModel(application: Application) : AndroidViewModel(application) 
                     _currentUser.value = updated
                 }
             }
+        }
+    }
+
+    // --- Reels Actions ---
+    fun postReel(
+        mediaUrl: String,
+        mediaType: String,
+        externalPlatform: String,
+        caption: String,
+        onSuccess: () -> Unit
+    ) {
+        val user = _currentUser.value
+        viewModelScope.launch {
+            val authorId = user?.id ?: -1
+            val authorName = user?.name ?: "Guest User"
+            val authorAvatar = user?.avatarUrl ?: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=120&q=80"
+            val authorRole = user?.role ?: "TENANT"
+            
+            val reel = Reel(
+                userId = authorId,
+                userName = authorName,
+                userAvatarUrl = authorAvatar,
+                userRole = authorRole,
+                mediaUrl = mediaUrl,
+                mediaType = mediaType,
+                externalPlatform = externalPlatform,
+                caption = caption
+            )
+            repository.insertReel(reel)
+            addNotification("Aesthetic Reel successfully posted!")
+            onSuccess()
+        }
+    }
+
+    fun toggleLikeReel(reel: Reel) {
+        viewModelScope.launch {
+            val updated = reel.copy(
+                isLiked = !reel.isLiked,
+                likesCount = if (reel.isLiked) reel.likesCount - 1 else reel.likesCount + 1
+            )
+            repository.updateReel(updated)
+        }
+    }
+
+    fun deleteReel(reel: Reel) {
+        viewModelScope.launch {
+            repository.deleteReel(reel)
+            addNotification("Your Reel has been deleted.")
         }
     }
 }

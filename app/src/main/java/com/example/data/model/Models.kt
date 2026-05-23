@@ -142,3 +142,21 @@ data class Review(
     val comment: String,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "reels")
+data class Reel(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val userId: Int,
+    val userName: String,
+    val userAvatarUrl: String,
+    val userRole: String,
+    val mediaUrl: String, // Can be photo URL, video URL, or external link
+    val mediaType: String, // "PHOTO", "VIDEO", "LINK"
+    val externalPlatform: String = "Platform", // "YouTube", "TikTok", "Vimeo", "Direct"
+    val caption: String,
+    val likesCount: Int = 0,
+    val commentsCount: Int = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isLiked: Boolean = false
+)
+

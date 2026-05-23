@@ -127,6 +127,21 @@ interface ReviewDao {
     suspend fun insertReview(review: Review): Long
 }
 
+@Dao
+interface ReelDao {
+    @Query("SELECT * FROM reels ORDER BY timestamp DESC")
+    fun getAllReelsFlow(): Flow<List<Reel>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReel(reel: Reel): Long
+
+    @Update
+    suspend fun updateReel(reel: Reel)
+
+    @Delete
+    suspend fun deleteReel(reel: Reel)
+}
+
 @Database(
     entities = [
         User::class,
@@ -135,9 +150,10 @@ interface ReviewDao {
         Message::class,
         SavedProperty::class,
         Payment::class,
-        Review::class
+        Review::class,
+        Reel::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class LivingDatabase : RoomDatabase() {
@@ -148,4 +164,5 @@ abstract class LivingDatabase : RoomDatabase() {
     abstract fun savedPropertyDao(): SavedPropertyDao
     abstract fun paymentDao(): PaymentDao
     abstract fun reviewDao(): ReviewDao
+    abstract fun reelDao(): ReelDao
 }

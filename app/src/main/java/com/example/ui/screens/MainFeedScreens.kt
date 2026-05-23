@@ -50,7 +50,8 @@ import com.example.ui.viewmodel.LivingViewModel
 fun TenantHomeScreen(
     viewModel: LivingViewModel,
     onNavigateToDetails: (Int) -> Unit,
-    onOpenSearchFilters: () -> Unit
+    onOpenSearchFilters: () -> Unit,
+    onNavigateToChat: (Int) -> Unit
 ) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val properties by viewModel.filteredProperties.collectAsState()
@@ -63,73 +64,128 @@ fun TenantHomeScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     val categories = listOf("All", "Apartment", "House", "Penthouse", "Studio")
 
-    LazyColumn(
+    var activeTab by remember { mutableStateOf("Catalogs") } // "Catalogs", "Reels", "Directory"
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("tenant_home_scroll"),
-        contentPadding = PaddingValues(bottom = 80.dp)
+            .testTag("tenant_home_screen_root")
     ) {
-        // 1. Beautiful Header Welcome Section
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(LivingTealPrimary.copy(alpha = 0.08f), Color.Transparent)
-                        )
+        // Welcome Header Section
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(LivingTealPrimary.copy(alpha = 0.08f), Color.Transparent)
                     )
-                    .padding(horizontal = 20.dp, vertical = 24.dp)
+                )
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column {
+                    Text(
+                        text = "FIND YOUR SANCTUARY",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 1.5.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Living Hub",
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-0.5).sp
+                        ),
+                        color = Color.White
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(LivingTealLight)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column {
-                        Text(
-                            text = "FIND YOUR SANCTUARY",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Medium,
-                                letterSpacing = 1.5.sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Living",
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = (-0.5).sp
-                            ),
-                            color = Color.White
-                        )
-                    }
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(24.dp)
                             .clip(CircleShape)
-                            .background(LivingTealLight)
-                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(LivingTealPrimary, LivingOrangeSecondary)
-                                    )
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(LivingTealPrimary, LivingOrangeSecondary)
                                 )
-                        )
-                    }
+                            )
+                    )
                 }
             }
         }
 
-        // 2. Search & Categories Filter bar
-        item {
+        // Standard Triple-Segment Social Switcher Tab
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val tabsList = listOf(
+                "Catalogs" to "🏡 Catalogs",
+                "Reels" to "✨ Living Reels",
+                "Directory" to "👥 Directory"
+            )
+            tabsList.forEach { (key, title) ->
+                val isSelected = activeTab == key
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) LivingTealPrimary else Color.Transparent)
+                        .clickable { activeTab = key }
+                        .padding(vertical = 10.dp)
+                        .testTag("tenant_tab_$key"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = title,
+                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        // Toggle UI Content based on state
+        when (activeTab) {
+            "Reels" -> {
+                Box(modifier = Modifier.weight(1f)) {
+                    LivingReelsSection(viewModel = viewModel, onNavigateToChat = onNavigateToChat)
+                }
+            }
+            "Directory" -> {
+                Box(modifier = Modifier.weight(1f)) {
+                    PeopleDirectorySection(viewModel = viewModel, onNavigateToChat = onNavigateToChat)
+                }
+            }
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("tenant_home_scroll"),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    // Search & Categories Filter bar
+                    item {
             Column(modifier = Modifier.padding(horizontal = 20.dp)) {
                 OutlinedTextField(
                     value = searchQuery,
@@ -284,6 +340,9 @@ fun TenantHomeScreen(
             }
         }
     }
+}
+}
+}
 }
 
 // --- Card Item for Promoted Homes ---

@@ -944,7 +944,11 @@ fun LivingAppLayout(viewModel: LivingViewModel) {
                                         TenantHomeScreen(
                                             viewModel = viewModel,
                                             onNavigateToDetails = { activePropertyIdDetails = it },
-                                            onOpenSearchFilters = { activeTenantTab = "SEARCH_FILTERS" }
+                                            onOpenSearchFilters = { activeTenantTab = "SEARCH_FILTERS" },
+                                            onNavigateToChat = { partnerId ->
+                                                activeChatPartnerId = partnerId
+                                                activeTenantTab = "MESSENGER_CHAT"
+                                            }
                                         )
                                     }
                                     "SEARCH_FILTERS" -> {
